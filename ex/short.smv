@@ -1,0 +1,12 @@
+MODULE main
+VAR
+	request : boolean;
+	state : {ready, busy};
+ASSIGN
+	init(state) := ready;
+	next(state) := case
+		state = ready & request : busy;
+		TRUE : {ready, busy};
+	esac;
+-- Comments start with two -- (dashes)
+SPEC AG(request -> AF state = busy) -- is true infinitely often on every computation path.

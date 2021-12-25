@@ -1,0 +1,73 @@
+MODULE node(priority, bus_active)
+VAR
+    counter : 0 .. 99;
+    state : {busy, skipping, waiting, sending};
+    beginning : boolean;
+    is_sending : boolean;
+    is_skipping : boolean;
+    is_waiting : boolean;
+ASSIGN
+    next(counter) := case
+        bus_active : 0;
+        counter < 99 : counter + 1;
+        TRUE : 99;
+    esac;
+    init(state) := busy;
+    next(state) := case
+        state = busy & beginning : {skipping, waiting};
+        state = busy : busy;
+        state = skipping & bus_active : busy;
+        state = skipping : skipping;
+        state = waiting & bus_active : waiting;
+        state = waiting & counter = priority : sending;
+        state = waiting : waiting;
+        state = sending : {busy, sending};
+    esac;
+    init(beginning) := FALSE;
+    next(beginning) := case
+        state = busy : FALSE;
+        !(state = busy) : TRUE;
+        TRUE : beginning;
+    esac;
+    init(is_sending) := FALSE;
+    next(is_sending) := case
+        state = sending : TRUE;
+        !(state = sending) : FALSE;
+        TRUE : is_sending;
+    esac;
+    init(is_skipping) := FALSE;
+    next(is_skipping) := case
+        state = skipping : TRUE;
+        !(state = skipping) : FALSE;
+        TRUE : is_skipping;
+    esac;
+    init(is_waiting) := FALSE;
+    next(is_waiting) := case
+        state = waiting : TRUE;
+        !(state = waiting) : FALSE;
+        TRUE : is_waiting;
+    esac;
+
+MODULE main
+VAR
+    node1 : node(1, bus_active);
+    node2 : node(2, bus_active);
+    node3 : node(3, bus_active);
+    node4 : node(4, bus_active);
+DEFINE
+    bus_active := node1.is_sending | node2.is_sending | node3.is_sending | node4.is_sending;
+-- safety : only one node uses the bus at a given time
+SPEC AG (node1.is_sending -> (!node2.is_sending & !node3.is_sending & !node4.is_sending))
+SPEC AG (node2.is_sending -> (!node1.is_sending & !node3.is_sending & !node4.is_sending))
+SPEC AG (node3.is_sending -> (!node1.is_sending & !node2.is_sending & !node4.is_sending))
+SPEC AG (node4.is_sending -> (!node1.is_sending & !node2.is_sending & !node3.is_sending))
+-- liveness : a node that is waiting for the bus will eventually get it,
+--            given that the nodes with higher priority are fair
+FAIRNESS node1.is_skipping
+FAIRNESS node1.is_skipping & node2.is_skipping
+FAIRNESS node1.is_skipping & node2.is_skipping & node3.is_skipping
+SPEC AG AF bus_active
+SPEC AG(node1.is_waiting -> AF node1.is_sending)
+SPEC AG(node2.is_waiting -> AF node2.is_sending)
+SPEC AG(node3.is_waiting -> AF node3.is_sending)
+SPEC AG(node4.is_waiting -> AF node4.is_sending)

@@ -1,0 +1,256 @@
+-- Trent (authentic server)
+MODULE authServer(clientReq, serverReq)
+VAR
+  -- 4 states of Trent
+  -- waiting : wait for request
+  -- sendKA : send A-server key
+  -- sendKB : send B-server key
+  -- sendEncryptedMsg : send encrypted message to A
+  state : {waiting, sendKA, sendKB, sendEncryptedMsg};
+ASSIGN
+  -- authentic server's state
+  init(state) := waiting; -- waiting first
+  next(state) := case
+    state = waiting & clientReq = requestKA & serverReq = requestKB : {sendKA, sendKB}; -- send keys request to authentic servers
+	  state = sendKA & clientReq = requestKA & serverReq = requestKB : {sendKB}; -- if already sent A's, send B's key
+	  state = sendKB & clientReq = requestKA & serverReq = requestKB : {sendKA}; -- if already sent B's, send A's key
+	  state = sendKB & clientReq = requestKSharing & serverReq = requestKB : {sendEncryptedMsg}; -- if A send request for sharing key, send encrypted msg
+	  state = waiting & clientReq = requestKSharing & serverReq = requestKB : {sendKB}; -- if A send request for sharing key and B send key request, send B's first
+	  state = waiting & clientReq = requestKA & serverReq = none : {sendKA}; -- if A send request, send A's key
+	  state = waiting & clientReq = requestKSharing & serverReq = none : {sendEncryptedMsg}; -- if A send request for sharing key, send encrypted msg
+	  state = waiting & clientReq = none & serverReq = requestKB : {sendKB}; -- if B send request, send B's key
+	  TRUE : waiting;
+  esac;
+FAIRNESS running
+
+-- Alice (client)
+MODULE client(authState, commFromServer)
+VAR
+  -- 2 states for session
+  session : {none, active};
+  -- 3 states for authentic request
+  authReq : {none, requestKA, requestKSharing};
+  -- 3 states for server request
+  serverReq : {none, initSession, secretDataFromA};
+  kARecieved : boolean; -- if received A's key or not
+  kSharingReceived : boolean; -- if received sharing key or not
+  duration : {0, 1, 2, 3, 4, 5}; -- max(duration) = 5
+  numSessions : {0, 1, 2, 3}; -- max(sessions) = 3
+ASSIGN
+  -- authentic request
+  init(authReq) := none;
+  next(authReq) := case
+    authReq = none & next(kARecieved) = FALSE : requestKA; -- if no request & no receive A's key, request A's key
+    authReq = none & next(kSharingReceived) = FALSE & numSessions != 3 : requestKSharing; -- if no request & no receive sharing key & sessions less than 3, request sharing key
+    authReq = none & next(kSharingReceived) = FALSE & numSessions = 3 : none; -- if no request & no receive sharing key & has 3 sessions, do nothing
+    authReq = requestKA & next(kARecieved) = TRUE & numSessions != 3 : requestKSharing; -- if request A's key & received A's key & sessions less than 3, request sharing key
+    authReq = requestKA & next(kARecieved) = TRUE & numSessions = 3 : none; -- if request A's key & received A's key & has 3 sessions, do nothing
+    authReq = requestKSharing & next(kSharingReceived) = TRUE : none; -- if request sharing key & received sharing key, do nothing
+    TRUE : authReq;
+  esac;
+  -- if received A's key or not
+  init(kARecieved) := FALSE;
+  next(kARecieved) := case
+    authReq = requestKA & authState = sendKA : TRUE; -- if request A's key & authentic server send A's key, start to receive key  
+	  TRUE : kARecieved;
+  esac;
+  -- if received sharing key or not
+  init(kSharingReceived) := FALSE;
+  next(kSharingReceived) := case
+    kARecieved = TRUE & authState = sendEncryptedMsg : TRUE; -- if received A's key & authentic server sent encypted msg, start to receive sharing key
+    next(duration) = 5 : FALSE;
+    TRUE : kSharingReceived;
+  esac;
+  -- server request
+  init(serverReq) := none;
+  next(serverReq) := case
+    serverReq = none & kARecieved = TRUE & kSharingReceived = TRUE : initSession; -- if server request none & received A's key & received sharing key, init server session
+    serverReq = initSession & kSharingReceived = TRUE & commFromServer = recognised : secretDataFromA; -- if server inited session & reveived sharing key & communications from server is recognised, start to receive encrypted msg from A
+    next(kSharingReceived) = FALSE : none;
+    TRUE : serverReq;
+  esac;
+  -- duration
+  init(duration) := 0;
+  next(duration) := case
+    session = none : 0;
+    session = active & duration = 5 : 5; -- max(duration) = 5
+    session = active : duration + 1;
+    TRUE : duration;
+  esac;
+  -- session
+  init(session) := none;
+  next(session) := case
+    next(duration) = 5 : none; -- if duration = 5, no more session
+    kSharingReceived = TRUE & commFromServer = recognised : active; -- if received sharing key & recognised server's ack, active session
+    TRUE : session;
+  esac;
+  -- numSessions
+  init(numSessions) := 0;
+  next(numSessions) := case
+    session = none & next(session) = active & numSessions = 3 : 3; -- max(sessions) = 3
+    session = none & next(session) = active : numSessions + 1; -- if session is active, add it
+    TRUE : numSessions;
+  esac;
+FAIRNESS running
+
+-- Bob (server)
+MODULE server(authState, commFromClient)
+VAR
+  -- 2 states for session
+  session : {none, active};
+  -- 2 states for authentic request
+  authReq : {none, requestKB};
+  -- 3 states for client request
+  clientReq : {none, recognised, secretDataFromB};
+  kBRecieved : boolean; -- if B's key received or not
+  kSharingReceived : boolean; -- if sharing key received or not
+  duration : {0, 1, 2, 3, 4, 5}; -- max(duration) = 5
+  numSessions : {0, 1, 2, 3}; -- max(sessions) = 3
+ASSIGN
+  -- authentic request
+  init(authReq) := none;
+  next(authReq) := case
+    authReq = none & next(kBRecieved) = FALSE : requestKB; -- if authentic server not request & not received B's key, start to request B's key
+    authReq = requestKB & next(kBRecieved) = TRUE : none; -- if authentic server request B's key & received B's key, do nothing
+    TRUE : authReq;
+  esac;
+  -- if B's key received or not
+  init(kBRecieved) := FALSE;
+  next(kBRecieved) := case
+    authReq = requestKB & authState = sendKB : TRUE; -- if authentic server request A's key & send A's key, start to receive B's key
+	  TRUE : kBRecieved;
+  esac;
+  -- if sharing key received of not
+  init(kSharingReceived) := FALSE;
+  next(kSharingReceived) := case
+    kBRecieved = TRUE & commFromClient = initSession : TRUE; -- if received B's key & commnication from A is init session, start to receive sharing key
+    next(duration) = 5 : FALSE; -- if duration reach the max, stop
+    TRUE : kSharingReceived;
+  esac;
+  -- client request
+  init(clientReq) := none;
+  next(clientReq) := case
+    clientReq = none & kBRecieved = TRUE & kSharingReceived = TRUE : recognised; -- if A not request & received B's key & received sharing key, start to send ack
+    clientReq = recognised & next(kSharingReceived) = TRUE & commFromClient = secretDataFromA : secretDataFromB; -- if recognised A's request & received sharing key & communications from A is encrypted msg, send encrypted msg to A
+    next(kSharingReceived) = FALSE : none;
+    TRUE : clientReq;
+  esac;
+  -- duration
+  init(duration) := 0;
+  next(duration) := case
+    session = none : 0;
+    session = active & duration = 5 : 5; -- max(duration) = 5
+    session = active : duration + 1;
+    TRUE : duration;
+  esac;
+  -- session
+  init(session) := none;
+  next(session) := case
+    next(duration) = 5 : none;
+    kSharingReceived = TRUE & next(commFromClient) = secretDataFromA : active; -- if received sharing key & communications from A is encrypted msg, active session
+    TRUE : session;
+  esac;
+  -- numSessions
+  init(numSessions) := 0;
+  next(numSessions) := case
+    session = none & next(session) = active & numSessions = 3 : 3; -- max(sessions) = 3
+    session = none & next(session) = active : numSessions + 1; -- if session is active, add it
+    TRUE : numSessions;
+  esac;
+FAIRNESS running
+
+-- Man in the middle
+MODULE midman(authState, commFromClient, commFromServer)
+VAR
+  kAReceived : boolean;
+  kBReceived : boolean;
+  kSharingReceived : boolean;
+  bAisCompromised : boolean;
+  bBisCompromised : boolean;
+  midmanToClient: {none, recognised, secretDataFromB};
+  midmanToServer: {none, initSession, secretDataFromA};
+  duration: {0, 1, 2, 3, 4, 5};
+  session: {none, active};
+ASSIGN
+  -- bKAS is A's secret key, needed to decrypt the session packet.
+  -- midman simply listens for it and stores it when found.
+  init(kAReceived) := FALSE;
+  next(kAReceived) := case
+    authState = sendKA : {TRUE, FALSE};
+    TRUE : kAReceived;
+  esac;
+  -- bKBS is B's secret key, needed to decrypt the session packet.
+  -- midman simply listens for it and stores it when found.
+  init(kBReceived) := FALSE;
+  next(kBReceived) := case
+    authState = sendKB : {TRUE, FALSE};
+    TRUE : kBReceived;
+  esac;
+  -- bKAB is the session key, needed to initiate the session between A & B.
+  -- midman can decrypt if it has eavesdropped KAS already.
+  init(kSharingReceived) := FALSE;
+  next(kSharingReceived) := case
+    kAReceived = TRUE & authState = sendEncryptedMsg : {TRUE, FALSE};
+    next(duration) = 5 : FALSE;
+    TRUE : kSharingReceived;
+  esac;
+  -- midmanToClient forwards messages received from Server as long as we
+  -- have the session key to decrypt them.
+  init(midmanToClient) := none;
+  next(midmanToClient) := case
+    next(commFromServer) = recognised & kBReceived = TRUE & kSharingReceived = TRUE : recognised;
+    next(commFromServer) = secretDataFromB & kBReceived = TRUE & kSharingReceived = TRUE : secretDataFromB;
+    next(kSharingReceived) = FALSE : none;
+    TRUE : midmanToClient;
+  esac;
+  -- midmanToClient forwards messages received from Client as long as we
+  -- have the session key to decrypt them.
+  init(midmanToServer) := none;
+  next(midmanToServer) := case
+    next(commFromClient) = initSession & kAReceived = TRUE & kSharingReceived = TRUE : initSession;
+    next(commFromClient) = secretDataFromA & kAReceived = TRUE & kSharingReceived = TRUE : secretDataFromA;
+    next(kSharingReceived) = FALSE : none;
+    TRUE : midmanToServer;
+  esac;
+  -- bAisCompromised is a flag to show that we have downloaded secret data from A
+  init(bAisCompromised) := FALSE;
+  next(bAisCompromised) := case
+    next(commFromClient) = secretDataFromA : TRUE;
+    TRUE : bAisCompromised;
+  esac;
+  -- bBisCompromised is a flag to show that we have downloaded secret data from B
+  init(bBisCompromised) := FALSE;
+  next(bBisCompromised) := case
+    next(commFromServer) = secretDataFromB : TRUE;
+    TRUE : bBisCompromised;
+  esac;
+  -- duration is the length an active session can stay active before it is ended
+  init(duration) := 0;
+  next(duration) := case
+      session = none : 0;
+      session = active & duration = 5 : 5;
+      session = active : duration + 1;
+      TRUE : duration;
+  esac;
+  -- session is a state of whether we are in an active session or not.
+  init(session) := none;
+  next(session) := case
+    duration = 5 : none;
+    kSharingReceived = TRUE & next(commFromClient) = secretDataFromA : active;
+    TRUE : session;
+  esac;
+FAIRNESS running
+
+-- https://nusmv.fbk.eu/NuSMV/userman/v25/nusmv.pdf
+-- https://blog.csdn.net/yuniruchujian/article/details/106213848
+-- https://github.com/gwynwilkinson/avcs-task
+-- kerberos main loop
+MODULE main
+VAR
+  t : process authServer(c.authReq, s.authReq);
+  c : process client(t.state, m.midmanToClient); -- midman hijack the request
+  s : process server(t.state, m.midmanToServer); -- midman hijack the request
+  m : process midman(t.state, c.serverReq, s.clientReq);
+-- if midman hijacks sharing key, midman can pretend as A
+CTLSPEC EG (m.kSharingReceived = TRUE -> AF m.bAisCompromised = TRUE)
+CTLSPEC AG (m.kSharingReceived = TRUE -> EF m.bAisCompromised = FALSE)

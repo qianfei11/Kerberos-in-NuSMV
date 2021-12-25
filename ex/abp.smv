@@ -1,0 +1,138 @@
+MODULE main
+VAR
+  s2rIn : S2RData;
+  s2rOut : S2RData;
+  r2sIn : R2SData;
+  r2sOut : R2SData;
+	sender : process Sender(s2rIn, r2sOut);
+  receiver : process Receiver(r2sIn, s2rOut);
+  r2s : process R2S(r2sIn, r2sOut);
+  s2r : process S2R(s2rIn, s2rOut);
+SPEC AG (AF sender.state = get & AF receiver.state = deliver)
+
+MODULE Sender(s2rIn, r2sOut)
+VAR
+	abp : boolean;
+	data : 0 .. 15;
+	state : {get, send, waitForAck};
+ASSIGN
+	init(state) := get;
+	init(abp) := FALSE;
+	next(state) := case
+		state = get : send;
+		state = send & s2rIn.tag = mt : waitForAck;
+		state = send & !(s2rIn.tag = mt) : send;
+		state = waitForAck & (!abp & r2sOut.tag = ack0 | abp & r2sOut.tag = ack1) : get;
+		state = waitForAck & (abp & r2sOut.tag = ack0 | !abp & r2sOut.tag = ack1 | r2sOut.tag = error) : send;
+		state = waitForAck & r2sOut.tag = mt : waitForAck;
+	esac;
+	next(abp) := case
+		state = waitForAck & (!abp & r2sOut.tag = ack0 | abp & r2sOut.tag = ack1) : !abp;
+		TRUE : abp;
+	esac;
+	next(data) := case
+		state = waitForAck & (!abp & r2sOut.tag = ack0 | abp & r2sOut.tag = ack1) : 0 .. 15;
+		TRUE : data;
+	esac;
+	next(s2rIn.tag) := case
+		state = send & s2rIn.tag = mt : case
+			abp : data1;
+			!abp : data0;
+		esac;
+		TRUE : s2rIn.tag;
+	esac;
+	next(s2rIn.data) := case
+		state = send & s2rIn.tag = mt : data;
+		TRUE : s2rIn.data;
+	esac;
+	next(r2sOut.tag) := case
+		state = waitForAck : mt;
+		TRUE : r2sOut.tag;
+	esac;
+FAIRNESS running
+
+MODULE Receiver(r2sIn, s2rOut)
+VAR
+	abp : boolean;
+	data : 0 .. 15;
+	state : {receive, deliver, sendAck};
+ASSIGN
+	init(state) := receive;
+	init(abp) := FALSE;
+	next(state) := case
+		state = receive & (!abp & s2rOut.tag = data0 | abp & s2rOut.tag = data1) : deliver;
+		state = receive & (abp & s2rOut.tag = data0 | !abp & s2rOut.tag = data1 | s2rOut.tag = error) : sendAck;
+		state = receive & s2rOut.tag = mt : state;
+		state = deliver : sendAck;
+		state = sendAck & r2sIn.tag = mt : receive;
+		state = sendAck & !(r2sIn.tag = mt) : state;
+	esac;
+	next(abp) := case
+		state = deliver : !abp;
+		TRUE : abp;
+	esac;
+	next(data) := case
+		state = receive & (!abp & s2rOut.tag = data0 | abp & s2rOut.tag = data1) : s2rOut.data;
+		TRUE : data;
+	esac;
+	next(s2rOut.tag) := case
+		state = receive : mt;
+		TRUE : s2rOut.tag;
+	esac;
+	next(s2rOut.data) := s2rOut.data;
+	next(r2sIn.tag) := case
+		state = sendAck & r2sIn.tag = mt : case
+			abp : ack0;
+			!abp : ack1;
+		esac;
+		TRUE : r2sIn.tag;
+	esac;
+FAIRNESS running
+
+MODULE S2RData
+VAR
+	tag : {mt, data0, data1, error};
+	data : 0 .. 15;
+ASSIGN
+	init(tag) := mt;
+
+MODULE R2SData
+VAR
+	tag : {mt, ack0, ack1, error};
+ASSIGN
+	init(tag) := mt;
+
+MODULE S2R(i, o)
+DEFINE
+	OK := o.tag = mt & !(i.tag = mt);
+ASSIGN
+	next(i.tag) := case
+		OK : mt;
+		TRUE : i.tag;
+	esac;
+	next(o.tag) := case
+		OK : {i.tag, error};
+		TRUE : o.tag;
+	esac;
+	next(i.data) := i.data;
+	next(o.data) := case
+		OK : i.data;
+		TRUE : o.data;
+	esac;
+FAIRNESS running
+FAIRNESS o.tag = data0 | o.tag = data1
+
+MODULE R2S(i, o)
+DEFINE
+	OK := o.tag = mt & !(i.tag = mt);
+ASSIGN
+	next(i.tag) := case
+		OK : mt;
+		TRUE : i.tag;
+	esac;
+	next(o.tag) := case
+		OK : {i.tag, error};
+		TRUE : o.tag;
+	esac;
+FAIRNESS running
+FAIRNESS o.tag = ack0 | o.tag = ack1

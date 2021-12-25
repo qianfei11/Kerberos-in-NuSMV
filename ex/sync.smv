@@ -1,0 +1,17 @@
+MODULE inverter(input)
+VAR
+	output : boolean;
+ASSIGN
+	init(output) := FALSE;
+	next(output) := !input;
+-- All existential formulas are false
+-- All universal formulas are true
+FAIRNESS running
+
+MODULE main
+VAR
+	-- `process`: a step of the composition is a step by exactly one process
+	gate1 : process inverter(gate3.output);
+	gate2 : process inverter(gate1.output);
+	gate3 : process inverter(gate2.output);
+SPEC (AG AF gate1.output) & (AG AF !gate1.output)

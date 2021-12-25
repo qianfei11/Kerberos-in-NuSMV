@@ -1,0 +1,41 @@
+MODULE main
+VAR 
+	ferryman : boolean;
+    goat : boolean;
+	cabbage : boolean;
+    wolf : boolean;
+	ship : {carry_goat, carry_cabbage, carry_wolf, none, man};
+ASSIGN
+	init(ferryman) := FALSE;
+	init(ship) := none;
+    init(goat) := FALSE;
+	init(cabbage) := FALSE; 
+    init(wolf) := FALSE;
+	next(ferryman) := case
+		ship = none : ferryman;
+		TRUE: !ferryman;
+	esac;
+    next(ship) := case
+        ferryman = FALSE & goat = FALSE & wolf = FALSE & cabbage = FALSE : carry_goat;
+        ferryman = TRUE & goat = TRUE & wolf = FALSE & cabbage = FALSE : {man, carry_goat};
+        ferryman = FALSE & goat = TRUE & wolf = FALSE & cabbage = FALSE : {man, carry_wolf, carry_cabbage};
+        ferryman = TRUE & goat = TRUE & wolf = TRUE & cabbage = FALSE : {carry_goat, carry_wolf};
+        ferryman = FALSE & goat = FALSE & wolf = TRUE & cabbage = FALSE : {carry_goat, carry_cabbage};
+        ferryman = TRUE & goat = FALSE & wolf = TRUE & cabbage = TRUE : {man, carry_cabbage, carry_wolf};
+        ferryman = FALSE & goat = FALSE & wolf = TRUE & cabbage = TRUE : {man, carry_goat};
+        ferryman = TRUE & goat = TRUE & wolf = TRUE & cabbage = TRUE : none; -- all pass
+        TRUE : none;
+    esac;
+	next(goat) := case
+		ferryman = goat & next(ship) = carry_goat : next(ferryman);
+		TRUE : goat;
+	esac;
+	next(cabbage) := case
+		ferryman = cabbage & next(ship) = carry_cabbage : next (ferryman);
+		TRUE : cabbage; 
+	esac;
+	next(wolf) := case
+		ferryman = wolf & next(ship) = carry_wolf : next(ferryman);
+		TRUE : wolf; 
+	esac;
+LTLSPEC !(((goat = cabbage | goat = wolf) -> goat = ferryman) U (cabbage & goat & wolf & ferryman))

@@ -1,0 +1,16 @@
+MODULE main
+VAR
+	x : boolean;
+	z : process zero(x);
+	o : process one(x);
+SPEC AG AF(x = FALSE)
+
+MODULE zero(a)
+ASSIGN
+	next(a) := FALSE;
+FAIRNESS running
+
+MODULE one(b)
+ASSIGN
+	next(b) := TRUE;
+FAIRNESS running

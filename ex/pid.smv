@@ -1,0 +1,13 @@
+MODULE main
+VAR
+    data : boolean;
+    turn : boolean;
+    user0 : user(FALSE, data, turn);
+    user1 : user(TRUE, data, !turn);
+ASSIGN
+    next(turn) := !turn;
+SPEC AG (AF data & AF (!data))
+
+MODULE user(pid, data, turn)
+-- changing shared data in a synchronous system between modules
+TRANS turn -> next(data) = pid

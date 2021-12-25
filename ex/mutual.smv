@@ -1,0 +1,27 @@
+MODULE user(turn, id, other)
+VAR
+    state : {n, t, c};
+ASSIGN
+    init(state) := n;
+    next(state) := case
+        state = n : {n, t};
+        state = t & other = n : c;
+        state = t & other = t & turn = id : c;
+        state = c : n;
+        TRUE : state;
+    esac;
+SPEC AG (state = t -> AF state = c)
+
+MODULE main
+VAR
+    turn : {1, 2};
+    user1 : user(turn, 1, user2.state);
+    user2 : user(turn, 2, user1.state);
+ASSIGN
+    init(turn) := 1;
+    next(turn) := case
+        user1.state = n & user2.state = t : 2;
+        user2.state = n & user1.state = t : 1;
+        TRUE : turn;
+    esac;
+SPEC AG (!(user1.state = c) & !(user2.state = c))

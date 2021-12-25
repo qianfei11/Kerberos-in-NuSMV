@@ -1,0 +1,155 @@
+MODULE North(NSLock, EWLock, FriendGo, FriendReq, FriendDone, OtherReq)
+VAR
+    Go : boolean;
+    Sense : boolean;
+    Req : boolean;
+    State : {idle, entering, critical, exiting};
+    Turn : {nst, wt};
+    Done : boolean;
+DEFINE
+    EnterCritical := State = entering & !EWLock & (Turn = nst & !OtherReq);
+ASSIGN
+    init(State) := idle;
+    next(State) := case
+        State = idle & Req : entering;
+        EnterCritical : critical;
+        State = critical & !Sense : exiting;
+        State = exiting : idle;
+        TRUE : State;
+    esac;
+    next(NSLock) := case
+        EnterCritical : TRUE;
+        State = exiting & !FriendGo : FALSE;
+        TRUE : NSLock;
+    esac;
+    init(Req) := FALSE;
+    next(Req) := case
+        State = exiting : FALSE;
+        Sense : TRUE;
+        TRUE : Req;
+    esac;
+    init(Go) := FALSE;
+    next(Go) := case
+        State = critical : TRUE;
+        State = exiting : FALSE;
+        TRUE : Go;
+    esac;
+    next(Turn) := case
+        State = exiting & Turn = nst & !FriendReq : wt;
+        State = exiting & Turn = nst & FriendDone & OtherReq : wt;
+        TRUE : Turn;
+    esac;
+    init(Done) := FALSE;
+    next(Done) := case
+        State = exiting : TRUE;
+        TRUE : Done;
+    esac;
+FAIRNESS !(Sense & Go)
+FAIRNESS running
+SPEC AG ((Sense & !Go) -> AF Go)
+
+MODULE South(NSLock, EWLock, FriendGo, FriendReq, FriendDone, OtherReq)
+VAR
+    Go : boolean;
+    Sense : boolean;
+    Req : boolean;
+    State : {idle, entering, critical, exiting};
+    Turn : {nst, wt};
+    Done : boolean;
+DEFINE
+    EnterCritical := State = entering & !EWLock & (Turn = nst & !OtherReq);
+ASSIGN
+    init(State) := idle;
+    next(State) := case
+        State = idle & Req : entering;
+        EnterCritical : critical;
+        State = critical & !Sense : exiting;
+        State = exiting : idle;
+        TRUE : State;
+    esac;
+    next(NSLock) := case
+        EnterCritical : TRUE;
+        State = exiting & !FriendGo : FALSE;
+        TRUE : NSLock;
+    esac;
+    init(Req) := FALSE;
+    next(Req) := case
+        State = exiting : FALSE;
+        Sense : TRUE;
+        TRUE : Req;
+    esac;
+    init(Go) := FALSE;
+    next(Go) := case
+        State = critical : TRUE;
+        State = exiting : FALSE;
+        TRUE : Go;
+    esac;
+    next(Turn) := case
+        State = exiting & Turn = nst & !FriendReq : wt;
+        State = exiting & Turn = nst & FriendDone & OtherReq : wt;
+        TRUE : Turn;
+    esac;
+    init(Done) := FALSE;
+    next(Done) := case
+        State = exiting : TRUE;
+        TRUE : Done;
+    esac;
+FAIRNESS !(Sense & Go)
+FAIRNESS running
+SPEC AG ((Sense & !Go) -> AF Go)
+
+MODULE West(NSLock, EWLock)
+VAR
+    Go : boolean;
+    Sense : boolean;
+    Req : boolean;
+    State : {idle, entering, critical, exiting};
+ASSIGN
+    init(State) := idle;
+    next(State) := case
+        State = idle & Req : entering;
+        State = entering & !NSLock : critical;
+        State = critical & !Sense : exiting;
+        State = exiting : idle;
+        TRUE : State;
+    esac;
+    next(EWLock) := case
+        State = entering & !NSLock : TRUE;
+        State = exiting : FALSE;
+        TRUE : EWLock;
+    esac;
+    init(Req) := FALSE;
+    next(Req) := case
+        State = exiting : FALSE;
+        Sense : TRUE;
+        TRUE : Req;
+    esac;
+    init(Go) := FALSE;
+    next(Go) := case
+        State = critical : TRUE;
+        State = exiting : FALSE;
+        TRUE : Go;
+    esac;
+FAIRNESS !(Sense & Go)
+FAIRNESS running
+
+MODULE main
+VAR
+    -- lock for North-South direction
+    NSLock : boolean;
+    -- lock for East-West direction
+    EWLock : boolean;
+    North : process North(NSLock, EWLock, South.Go, South.Req, South.Done, West.Req);
+    South : process South(NSLock, EWLock, North.Go, North.Req, North.Done, West.Req);
+    West : process West(EWLock, NSLock);
+ASSIGN
+    init(NSLock) := FALSE;
+    init(EWLock) := FALSE;
+-- mutual exclusion
+SPEC AG !(West.Go & (North.Go | South.Go))
+-- liveness (in north direction)
+SPEC AG (North.Sense & !North.Go -> AF North.Go)
+SPEC AG (South.Sense & !South.Go -> AF South.Go)
+SPEC AG (West.Sense & !West.Go -> AF West.Go)
+-- no strict sequencing
+SPEC AG (West.Go -> A[West.Go U !West.Go & A[!West.Go U South.Go | North.Go]])
